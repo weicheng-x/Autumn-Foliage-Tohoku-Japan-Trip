@@ -299,7 +299,7 @@
   }
 
   .fx-input-group input[type="number"] {
-    width: 60px;
+    width: 76px;
     background: transparent;
     border: none;
     color: #FFF;
@@ -1163,10 +1163,9 @@
         </div>
         <div class="fx-input-group">
           <span style="color:#CBD5E1;font-size:12.5px;">1 SGD =</span>
-          <input type="number" id="fxRateInput" value="122" min="50" max="250" step="0.5" onchange="updateFxRate(this.value)" oninput="updateFxRate(this.value)">
+          <input type="number" id="fxRateInput" value="122" min="50" max="250" step="0.01" oninput="handleFxInput(this)" onchange="handleFxInput(this)">
           <span style="color:#CBD5E1;font-size:12.5px;font-weight:700;" id="fxUnitLabel">JPY</span>
         </div>
-        <button class="btn" style="padding:5px 9px;font-size:11px;" onclick="updateFxRate(122)" id="fxResetBtn">122</button>
       </div>
       <button class="btn" style="background:rgba(255,255,255,0.12);color:#FFF;border-color:rgba(255,255,255,0.25);padding:10px 14px;" onclick="toggleDarkMode()" id="themeBtn">🌙 Dark Mode</button>
     </div>
@@ -1549,11 +1548,31 @@ function jumpToRegionSchedule(regKey) {
   renderItineraryCards();
 }
 
+function handleFxInput(inputEl) {
+  let raw = String(inputEl.value || "");
+  if (raw.includes(".")) {
+    const parts = raw.split(".");
+    if (parts[1] && parts[1].length > 2) {
+      raw = parts[0] + "." + parts[1].slice(0, 2);
+      inputEl.value = raw;
+    }
+  }
+  const num = parseFloat(raw);
+  if (!isNaN(num) && num > 10) {
+    state.fxRate = Math.round(num * 100) / 100;
+    saveState();
+    renderAll();
+  }
+}
+
 function updateFxRate(val) {
   const num = parseFloat(val);
   if (!isNaN(num) && num > 10) {
-    state.fxRate = num;
-    document.getElementById("fxRateInput").value = num;
+    state.fxRate = Math.round(num * 100) / 100;
+    const inputEl = document.getElementById("fxRateInput");
+    if (inputEl && document.activeElement !== inputEl) {
+      inputEl.value = state.fxRate;
+    }
     saveState();
     renderAll();
   }
@@ -1578,7 +1597,6 @@ function renderStaticChrome() {
     ? "Exchange Rate (SGD ↔ JPY)<span>Live sync across all tabs</span>"
     : "為替レート (SGD ↔ JPY)<span>全タブ即時連動</span>";
   document.getElementById("fxUnitLabel").textContent = en ? "JPY" : "円";
-  document.getElementById("fxResetBtn").textContent = en ? "Reset (122)" : "122円";
 
   document.getElementById("themeBtn").textContent = state.darkMode
     ? (en ? "☀️ Light Mode" : "☀️ ライト表示")
