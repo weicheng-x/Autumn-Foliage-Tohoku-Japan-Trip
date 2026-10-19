@@ -1308,7 +1308,7 @@
         </div>
         <div class="fx-input-group">
           <span style="color:#CBD5E1;font-size:12.5px;">1 SGD =</span>
-          <input type="number" id="fxRateInput" value="122" min="50" max="250" step="0.01" oninput="handleFxInput(this)" onchange="handleFxInput(this)">
+          <input type="number" id="fxRateInput" value="122" min="0" max="9999" step="0.01" onkeydown="handleFxKeydown(event)" oninput="handleFxInput(this)" onchange="handleFxInput(this)">
           <span style="color:#CBD5E1;font-size:12.5px;font-weight:700;" id="fxUnitLabel">JPY</span>
         </div>
       </div>
@@ -1389,11 +1389,29 @@
         <div class="section-card" style="margin-top:22px;">
           <h2>
             <span id="prepCardTitle">🎒 Pre-Trip & Reservation Checklist</span>
-            <span class="pass-badge" id="checklistProgressBadge" style="font-size:12px;">0 / 8 Done</span>
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+              <span class="pass-badge" id="checklistProgressBadge" style="font-size:12px;">0 / 8 Done</span>
+              <button type="button" class="btn btn-primary" id="btnAddNewPrepItem" onclick="togglePrepAddForm()" style="font-size:12px;padding:6px 12px;">Add new item</button>
+            </div>
           </h2>
           <p class="lead" style="margin-bottom:12px;" id="prepCardLead">
             Click any item to mark it complete (automatically saved in your browser).
           </p>
+          <div id="prepAddFormContainer" style="display:none;background:var(--surface-alt);border:1px solid var(--border-strong);border-radius:12px;padding:14px 16px;margin-bottom:14px;">
+            <div style="display:flex;flex-direction:column;gap:5px;">
+              <label for="newPrepTitleInput" id="lblPrepTitle" style="font-size:12.5px;font-weight:800;color:var(--ink);">Title</label>
+              <input type="text" id="newPrepTitleInput" class="search-input" placeholder="Title" style="width:100%;" oninput="clearPrepError()">
+            </div>
+            <div style="display:flex;flex-direction:column;gap:5px;margin-top:10px;">
+              <label for="newPrepDetailsInput" id="lblPrepDetails" style="font-size:12.5px;font-weight:800;color:var(--ink);">Additional details</label>
+              <textarea id="newPrepDetailsInput" class="search-input" rows="2" placeholder="Additional details" style="width:100%;resize:vertical;font-family:inherit;" oninput="clearPrepError()"></textarea>
+            </div>
+            <div id="prepFormError" role="alert" style="display:none;margin-top:10px;padding:8px 12px;border-radius:8px;background:#FEF2F2;border:1px solid #FECACA;color:#B91C1C;font-size:12.5px;font-weight:700;"></div>
+            <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px;">
+              <button type="button" class="btn" id="btnCancelPrepItem" onclick="closePrepAddForm()">Cancel</button>
+              <button type="button" class="btn btn-primary" id="btnUpdatePrepItem" onclick="handleUpdatePrepChecklist()">Update</button>
+            </div>
+          </div>
           <div class="bar-track" style="height:8px;margin-bottom:14px;">
             <div class="bar-fill" id="checklistProgressBar" style="width:0%;background:linear-gradient(90deg, var(--forest), #34D399);transition:width 0.25s ease;"></div>
           </div>
@@ -1599,6 +1617,7 @@ let state = {
   activeAccessKey: "ALL",
   activeGuideKey: "ALL",
   prepDone: {},
+  showPrepForm: false,
   syncedLocalTransit: false,
   dataEn: JSON.parse(JSON.stringify(DATA_EN)),
   dataJa: JSON.parse(JSON.stringify(DATA_JA))
@@ -1625,7 +1644,7 @@ function showToast(msg) {
 
 function loadState() {
   try {
-    const saved = localStorage.getItem("jpTrip2026State_bilingual_v1");
+    const saved = localStorage.getItem("jpTrip2026State_bilingual_v2");
     if (saved) {
       const parsed = JSON.parse(saved);
       if (parsed && parsed.dataEn && parsed.dataJa) {
@@ -1641,7 +1660,7 @@ function loadState() {
 
 function saveState() {
   try {
-    localStorage.setItem("jpTrip2026State_bilingual_v1", JSON.stringify(state));
+    localStorage.setItem("jpTrip2026State_bilingual_v2", JSON.stringify(state));
   } catch (e) {}
 }
 
@@ -1665,7 +1684,8 @@ function fmtJpy(val) {
 }
 
 function fmtSgd(jpyVal) {
-  const sgd = (Number(jpyVal) || 0) / (state.fxRate || 122);
+  const rate = Number(state.fxRate);
+  const sgd = (!isNaN(rate) && rate > 0) ? ((Number(jpyVal) || 0) / rate) : 0;
   return "S$" + sgd.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
@@ -1693,8 +1713,25 @@ function jumpToRegionSchedule(regKey) {
   renderItineraryCards();
 }
 
+function handleFxKeydown(e) {
+  // Ignore negative sign '-', '+', and scientific notation 'e'/'E'
+  if (e.key === "-" || e.key === "+" || e.key === "e" || e.key === "E") {
+    e.preventDefault();
+  }
+}
+
 function handleFxInput(inputEl) {
   let raw = String(inputEl.value || "");
+  if (raw.includes("-")) {
+    raw = raw.replace(/-/g, "");
+    inputEl.value = raw;
+  }
+  if (raw.trim() === "") {
+    state.fxRate = 0;
+    saveState();
+    renderAll();
+    return;
+  }
   if (raw.includes(".")) {
     const parts = raw.split(".");
     if (parts[1] && parts[1].length > 2) {
@@ -1702,8 +1739,16 @@ function handleFxInput(inputEl) {
       inputEl.value = raw;
     }
   }
-  const num = parseFloat(raw);
-  if (!isNaN(num) && num > 10) {
+  let num = parseFloat(raw);
+  if (!isNaN(num)) {
+    if (num < 0) {
+      num = 0;
+      inputEl.value = "0";
+    }
+    if (num > 9999) {
+      num = 9999;
+      inputEl.value = "9999";
+    }
     state.fxRate = Math.round(num * 100) / 100;
     saveState();
     renderAll();
@@ -1711,15 +1756,10 @@ function handleFxInput(inputEl) {
 }
 
 function updateFxRate(val) {
-  const num = parseFloat(val);
-  if (!isNaN(num) && num > 10) {
-    state.fxRate = Math.round(num * 100) / 100;
-    const inputEl = document.getElementById("fxRateInput");
-    if (inputEl && document.activeElement !== inputEl) {
-      inputEl.value = state.fxRate;
-    }
-    saveState();
-    renderAll();
+  const inputEl = document.getElementById("fxRateInput");
+  if (inputEl) {
+    inputEl.value = val;
+    handleFxInput(inputEl);
   }
 }
 
@@ -2168,6 +2208,118 @@ function renderOverviewTab() {
   renderPrepChecklist();
 }
 
+function escapeHtml(str) {
+  return String(str || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function getPrepErrorMsg(errType) {
+  const en = isEn();
+  if (errType === "both_empty") {
+    return en
+      ? "Both title and additional details cannot be empty."
+      : "タイトルと追加の詳細の両方を空にすることはできません。";
+  }
+  if (errType === "title_blank") {
+    return en
+      ? "Title cannot be blank!"
+      : "タイトルを入力してください！";
+  }
+  return "";
+}
+
+function togglePrepAddForm() {
+  state.showPrepForm = true;
+  const formBox = document.getElementById("prepAddFormContainer");
+  if (formBox) {
+    formBox.style.display = "block";
+    clearPrepError();
+    const titleInput = document.getElementById("newPrepTitleInput");
+    if (titleInput) titleInput.focus();
+  }
+}
+
+function closePrepAddForm() {
+  state.showPrepForm = false;
+  const formBox = document.getElementById("prepAddFormContainer");
+  if (formBox) formBox.style.display = "none";
+  clearPrepError();
+}
+
+function clearPrepError() {
+  state.prepErrorType = null;
+  const errBox = document.getElementById("prepFormError");
+  if (errBox) {
+    errBox.textContent = "";
+    errBox.style.display = "none";
+  }
+}
+
+function handleUpdatePrepChecklist() {
+  const titleInput = document.getElementById("newPrepTitleInput");
+  const detailsInput = document.getElementById("newPrepDetailsInput");
+  const errBox = document.getElementById("prepFormError");
+  const title = (titleInput ? titleInput.value : "").trim();
+  const details = (detailsInput ? detailsInput.value : "").trim();
+
+  if (!title && !details) {
+    state.prepErrorType = "both_empty";
+    const msg = getPrepErrorMsg("both_empty");
+    if (errBox) {
+      errBox.textContent = msg;
+      errBox.style.display = "block";
+    }
+    showToast(msg);
+    return;
+  }
+
+  if (!title) {
+    state.prepErrorType = "title_blank";
+    const msg = getPrepErrorMsg("title_blank");
+    if (errBox) {
+      errBox.textContent = msg;
+      errBox.style.display = "block";
+    }
+    showToast(msg);
+    return;
+  }
+
+  clearPrepError();
+  const newId = "prep_" + Date.now();
+  const newItem = {
+    id: newId,
+    title: title,
+    sub: details
+  };
+  state.dataEn.prep.push(JSON.parse(JSON.stringify(newItem)));
+  state.dataJa.prep.push(JSON.parse(JSON.stringify(newItem)));
+
+  if (titleInput) titleInput.value = "";
+  if (detailsInput) detailsInput.value = "";
+  state.showPrepForm = false;
+  const formBox = document.getElementById("prepAddFormContainer");
+  if (formBox) formBox.style.display = "none";
+
+  saveState();
+  renderPrepChecklist();
+  showToast(isEn() ? "✅ Updated pre-trip & reservation checklist!" : "✅ チェックリストを更新しました！");
+}
+
+function deletePrepTask(event, taskId) {
+  if (event) event.stopPropagation();
+  state.dataEn.prep = state.dataEn.prep.filter(t => t.id !== taskId);
+  state.dataJa.prep = state.dataJa.prep.filter(t => t.id !== taskId);
+  if (state.prepDone && taskId in state.prepDone) {
+    delete state.prepDone[taskId];
+  }
+  saveState();
+  renderPrepChecklist();
+  showToast(isEn() ? "🗑️ Item deleted from checklist" : "🗑️ チェックリスト項目を削除しました");
+}
+
 function togglePrepTask(taskId) {
   if (!state.prepDone) state.prepDone = {};
   state.prepDone[taskId] = !state.prepDone[taskId];
@@ -2182,23 +2334,58 @@ function renderPrepChecklist() {
     ? "🎒 Pre-Trip & Reservation Checklist"
     : "🎒 出発前＆現地手配チェックリスト";
   document.getElementById("prepCardLead").textContent = en
-    ? "Click any item to mark it complete (automatically saved in your browser)."
-    : "クリックして完了チェックを付けられます（ブラウザに自動保存）。";
+    ? "Click any item to mark it complete, add new items, or delete items (automatically saved in your browser)."
+    : "クリックして完了チェック、新規項目の追加、不要項目の削除が可能です（ブラウザ自動保存）。";
+
+  const addBtn = document.getElementById("btnAddNewPrepItem");
+  if (addBtn) addBtn.textContent = en ? "Add new item" : "新規項目を追加";
+  const lblTitle = document.getElementById("lblPrepTitle");
+  if (lblTitle) lblTitle.textContent = en ? "Title" : "タイトル";
+  const titleInput = document.getElementById("newPrepTitleInput");
+  if (titleInput) titleInput.placeholder = en ? "Title" : "タイトル";
+  const lblDetails = document.getElementById("lblPrepDetails");
+  if (lblDetails) lblDetails.textContent = en ? "Additional details" : "追加の詳細";
+  const detailsInput = document.getElementById("newPrepDetailsInput");
+  if (detailsInput) detailsInput.placeholder = en ? "Additional details" : "追加の詳細";
+  const btnCancel = document.getElementById("btnCancelPrepItem");
+  if (btnCancel) btnCancel.textContent = en ? "Cancel" : "キャンセル";
+  const btnUpdate = document.getElementById("btnUpdatePrepItem");
+  if (btnUpdate) btnUpdate.textContent = en ? "Update" : "更新";
+
+  const errBox = document.getElementById("prepFormError");
+  if (errBox && state.prepErrorType) {
+    errBox.textContent = getPrepErrorMsg(state.prepErrorType);
+    errBox.style.display = "block";
+  }
 
   const grid = document.getElementById("prepChecklistGrid");
   if (!grid) return;
   if (!state.prepDone) state.prepDone = {};
+
+  if (!tasks || tasks.length === 0) {
+    const emptyText = en ? "No items pending action" : "対応待ちの項目はありません";
+    grid.innerHTML = `<div style="grid-column:1 / -1;padding:18px;text-align:center;color:var(--ink-muted);font-size:13.5px;font-weight:700;background:var(--bg);border:1px dashed var(--border-strong);border-radius:10px;">${emptyText}</div>`;
+    const badge = document.getElementById("checklistProgressBadge");
+    if (badge) badge.textContent = en ? "0 / 0 Done (0%)" : "0 / 0 完了 (0%)";
+    const bar = document.getElementById("checklistProgressBar");
+    if (bar) bar.style.width = "0%";
+    return;
+  }
+
   let doneCount = 0;
   grid.innerHTML = tasks.map(t => {
     const done = !!state.prepDone[t.id];
     if (done) doneCount++;
     return `
-      <div onclick="togglePrepTask('${t.id}')" style="cursor:pointer;padding:10px 12px;border-radius:10px;border:1px solid ${done ? 'var(--forest)' : 'var(--border)'};background:${done ? 'var(--forest-soft)' : 'var(--bg)'};display:flex;align-items:flex-start;gap:9px;transition:all 0.15s ease;">
-        <span style="font-size:15px;line-height:1.2;">${done ? '✅' : '⬜'}</span>
-        <div>
-          <div style="font-size:12.5px;font-weight:800;color:var(--ink);${done ? 'text-decoration:line-through;opacity:0.75;' : ''}">${t.title}</div>
-          <div style="font-size:11px;color:var(--ink-muted);margin-top:2px;">${t.sub}</div>
+      <div onclick="togglePrepTask('${t.id}')" style="cursor:pointer;padding:10px 12px;border-radius:10px;border:1px solid ${done ? 'var(--forest)' : 'var(--border)'};background:${done ? 'var(--forest-soft)' : 'var(--bg)'};display:flex;align-items:flex-start;justify-content:space-between;gap:9px;transition:all 0.15s ease;">
+        <div style="display:flex;align-items:flex-start;gap:9px;flex:1;min-width:0;">
+          <span style="font-size:15px;line-height:1.2;">${done ? '✅' : '⬜'}</span>
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:12.5px;font-weight:800;color:var(--ink);word-break:break-word;${done ? 'text-decoration:line-through;opacity:0.75;' : ''}">${escapeHtml(t.title)}</div>
+            ${t.sub ? `<div style="font-size:11px;color:var(--ink-muted);margin-top:2px;word-break:break-word;">${escapeHtml(t.sub)}</div>` : `<div style="font-size:11px;color:var(--ink-muted);"></div>`}
+          </div>
         </div>
+        <button type="button" class="btn btn-danger" style="padding:3px 8px;font-size:11px;flex-shrink:0;" onclick="deletePrepTask(event, '${t.id}')" title="${en ? 'Delete item' : '項目を削除'}">🗑️ ${en ? 'Delete' : '削除'}</button>
       </div>
     `;
   }).join("");
@@ -3217,7 +3404,7 @@ function exportCsv() {
       d.day, d.dow, d.date, d.region,
       `"${(d.routeJp || '').replace(/"/g, '""')}"`,
       `"${(d.hotel || '').replace(/"/g, '""')}"`,
-      stay, travel, fun, tot, (tot / state.fxRate).toFixed(2)
+      stay, travel, fun, tot, (state.fxRate > 0 ? (tot / state.fxRate).toFixed(2) : '0.00')
     ]);
   });
   const csvContent = "data:text/csv;charset=utf-8," + rows.map(r => r.join(",")).join("\n");
